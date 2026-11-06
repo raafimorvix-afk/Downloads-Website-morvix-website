@@ -162,5 +162,13 @@ await as('owner', () => q(`update profiles set active = false where id = $1`, [i
 ok((await q(`select count(*)::int c from auth.sessions where user_id = $1`, [ids.agent2])).rows[0].c === 0, 'deactivating a person signs them out');
 ok(!!(await as('agent2', () => tryq(`select submit_lead($1::jsonb)`, [JSON.stringify({ company: 'X', phone: '1' })]))).error, 'deactivated agent cannot submit');
 
+// ---- imported history links to a new agent login by name / alias
+await as('owner', () => q(`insert into leads (shift_id, company, agent_name_raw) values ($1,'Old A','Luis Torres'), ($1,'Old B','luis'), ($2,'Old C','Luis Torres')`, [N, A]));
+const luis = (await as('owner', () => q(`select create_staff('luis@x.com','longpassword','Luis Torres','agent',$1) as id`, [N]))).rows[0].id;
+await as('owner', () => q(`update profiles set aliases = '{Luis}' where id = $1`, [luis]));
+const linked = (await as('owner', () => q(`select link_agent_history($1) as n`, [luis]))).rows[0].n;
+ok(linked === 2, `linked ${linked} imported leads by name and alias, same shift only (expect 2)`);
+ok(!!(await as('night', () => tryq(`select link_agent_history($1)`, [luis]))).error, 'managers cannot run history linking');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

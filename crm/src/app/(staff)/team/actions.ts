@@ -11,11 +11,12 @@ export async function addStaff(form: FormData) {
   await requireProfile(["owner"]);
   const g = (k: string) => String(form.get(k) ?? "").trim();
   const supabase = await createClient();
-  const { error } = await supabase.rpc("create_staff", {
+  const { data: newId, error } = await supabase.rpc("create_staff", {
     p_email: g("email"), p_password: g("password"), p_full_name: g("full_name"), p_role: g("role"), p_shift: g("shift_id") || null,
   });
   if (error) back({ err: KNOWN.test(error.message) ? error.message : "Could not create the login." });
-  back({ ok: `Login created for ${g("email")}. Give them the password you set; they sign in at the CRM address.` });
+  const { data: linked } = await supabase.rpc("link_agent_history", { p_agent: newId });
+  back({ ok: `Login created for ${g("email")}.${linked ? ` Linked ${linked} past leads with the same name.` : ""} Give them the password you set.` });
 }
 
 export async function updateStaff(id: string, form: FormData) {
@@ -28,7 +29,9 @@ export async function updateStaff(id: string, form: FormData) {
     full_name: g("full_name"), role, shift_id: role === "owner" ? null : g("shift_id") || null, active: form.get("active") === "on",
     aliases: g("aliases").split(",").map((a) => a.trim()).filter(Boolean),
   }).eq("id", id);
-  back(error ? { err: "Could not save. Managers and agents need a shift." } : { ok: "Saved." });
+  if (error) back({ err: "Could not save. Managers and agents need a shift." });
+  const { data: linked } = await supabase.rpc("link_agent_history", { p_agent: id });
+  back({ ok: linked ? `Saved. Linked ${linked} past leads to this agent.` : "Saved." });
 }
 
 export async function resetPassword(id: string, form: FormData) {
