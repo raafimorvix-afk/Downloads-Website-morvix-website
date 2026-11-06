@@ -6,7 +6,14 @@ const q = (s, p) => db.query(s, p);
 await db.exec(`
 create role anon; create role authenticated; create role service_role bypassrls;
 create schema auth; create schema storage;
-create table auth.users (id uuid primary key);
+create table auth.users (instance_id uuid, id uuid primary key, aud text, role text, email text, encrypted_password text,
+  email_confirmed_at timestamptz, raw_app_meta_data jsonb, raw_user_meta_data jsonb, created_at timestamptz, updated_at timestamptz,
+  confirmation_token text, email_change text, email_change_token_new text, recovery_token text);
+create table auth.identities (provider_id text, user_id uuid, identity_data jsonb, provider text, last_sign_in_at timestamptz, created_at timestamptz, updated_at timestamptz);
+create table auth.sessions (id uuid primary key default gen_random_uuid(), user_id uuid);
+create schema extensions;
+create function extensions.gen_salt(t text) returns text language sql as $$ select 'salt' $$;
+create function extensions.crypt(p text, s text) returns text language sql as $$ select 'hash:' || p $$;
 create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.sub', true),'')::uuid $$;
 create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint);
 create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text, name text);
@@ -23,7 +30,7 @@ await db.exec(`grant all on all tables in schema public to authenticated; grant 
 const ids = { owner: '00000000-0000-0000-0000-000000000001', night: '00000000-0000-0000-0000-000000000002',
   day: '00000000-0000-0000-0000-000000000003', agent: '00000000-0000-0000-0000-000000000004', agent2: '00000000-0000-0000-0000-000000000005' };
 const [N, A] = (await q(`select id from shifts order by name desc`)).rows.map(r => r.id); // US Night, Australia
-for (const id of Object.values(ids)) await q(`insert into auth.users values ($1)`, [id]);
+for (const id of Object.values(ids)) await q(`insert into auth.users (id) values ($1)`, [id]);
 await q(`insert into profiles (id, full_name, email, role, shift_id) values
  ($1,'Owner','o@x','owner',null), ($2,'Night Mgr','n@x','manager',$6), ($3,'Day Mgr','d@x','manager',$7),
  ($4,'Agent Night','a@x','agent',$6), ($5,'Agent Day','b@x','agent',$7)`, [ids.owner, ids.night, ids.day, ids.agent, ids.agent2, N, A]);
@@ -121,6 +128,39 @@ ok(Number(lastMonth.passes) === 0, 'passes do not leak into other months');
 const tpl = (await as('night', () => q(`select count(*)::int c from email_templates`))).rows[0].c;
 ok(tpl === 1, 'managers can read the shared lead email template');
 ok((await as('agent', () => q(`select * from email_templates`))).rows.length === 0, 'agents cannot read email templates');
+
+// ---- managers cannot pay themselves; bonus rates are owner-only
+const selfBonus = await as('night', () => tryq(`insert into agent_adjustments (agent_id, shift_id, month, kind, amount, reason) values ($1,$2,date_trunc('month',now())::date,'bonus',9999,'me')`, [ids.night, N]));
+ok(!!selfBonus.error, 'manager cannot give themselves a bonus');
+const otherShift = await as('night', () => tryq(`insert into agent_adjustments (agent_id, shift_id, month, kind, amount, reason) values ($1,$2,date_trunc('month',now())::date,'fine',100,'x')`, [ids.agent2, N]));
+ok(!!otherShift.error, 'manager cannot fine an agent from the other shift');
+const rate = await as('night', () => q(`update bonus_rules set amount_per_pass = 99999`));
+ok(rate.affectedRows === 0, 'manager cannot change bonus rates');
+ok((await as('owner', () => q(`update bonus_rules set amount_per_pass = amount_per_pass`))).affectedRows === 4, 'owner can change bonus rates');
+
+// ---- BDM revenue + owner-set bonus
+await as('owner', async () => {
+  await q(`update clients set onboarded_by = $1 where company = 'Finishing Touch'`, [ids.night]);
+  await q(`insert into bdm_bonuses (manager_id, month, amount, note) values ($1, date_trunc('month',now())::date, 15000, 'Hit target')`, [ids.night]);
+  await q(`update leads set client_id = (select id from clients where company='Finishing Touch'), price = 100 where agent_id = $1`, [ids.agent]);
+});
+const bdmOwner = (await as('owner', () => q(`select * from bdm_month(current_date)`))).rows;
+const nm = bdmOwner.find(r => r.manager_id === ids.night);
+ok(bdmOwner.length === 2 && Number(nm.billed) === 700 && Number(nm.bonus) === 15000, `owner sees all BDMs; night billed=${nm?.billed} bonus=${nm?.bonus}`);
+const bdmSelf = (await as('night', () => q(`select * from bdm_month(current_date)`))).rows;
+ok(bdmSelf.length === 1 && bdmSelf[0].manager_id === ids.night, 'manager sees only their own BDM numbers');
+ok(!!(await as('night', () => tryq(`insert into bdm_bonuses (manager_id, month, amount) values ($1, '2026-01-01', 1)`, [ids.night]))).error, 'manager cannot set their own BDM bonus');
+
+// ---- staff logins
+const made = await as('owner', () => tryq(`select create_staff('New.Agent@x.com','longpassword','New Agent','agent',$1) as id`, [N]));
+ok(!made.error, 'owner can create a staff login ' + (made.error || ''));
+ok(!!(await as('night', () => tryq(`select create_staff('a@b.com','longpassword','A','agent',$1)`, [N]))).error, 'manager cannot create logins');
+ok(!!(await as('owner', () => tryq(`select create_staff('new.agent@x.com','longpassword','Dup','agent',$1)`, [N]))).error, 'duplicate email rejected');
+ok(!!(await as('owner', () => tryq(`select create_staff('z@x.com','short','Z','agent',$1)`, [N]))).error, 'short password rejected');
+await q(`insert into auth.sessions (user_id) values ($1)`, [ids.agent2]);
+await as('owner', () => q(`update profiles set active = false where id = $1`, [ids.agent2]));
+ok((await q(`select count(*)::int c from auth.sessions where user_id = $1`, [ids.agent2])).rows[0].c === 0, 'deactivating a person signs them out');
+ok(!!(await as('agent2', () => tryq(`select submit_lead($1::jsonb)`, [JSON.stringify({ company: 'X', phone: '1' })]))).error, 'deactivated agent cannot submit');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

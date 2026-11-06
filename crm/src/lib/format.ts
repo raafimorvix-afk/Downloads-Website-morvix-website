@@ -41,3 +41,30 @@ export function formatDate(iso: string | null) {
 export function formatBDT(n: number | string | null | undefined) {
   return "BDT " + Number(n ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
+
+/** "2026-11-13T11:00" as shown in the given zone, for <input type="datetime-local"> */
+export function toLocalInput(iso: string | null, tz: string | null) {
+  if (!iso) return "";
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz || "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+}
+
+/** local wall-clock time in a zone -> ISO UTC. Handles daylight saving. */
+export function zonedToUtc(local: string, tz: string) {
+  const [d, t = "00:00"] = local.split("T");
+  const [y, mo, da] = d.split("-").map(Number);
+  const [h, mi] = t.split(":").map(Number);
+  const wall = Date.UTC(y, mo - 1, da, h, mi);
+  const offsetAt = (ms: number) => {
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+      timeZone: tz, year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", hourCycle: "h23",
+    }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) - ms;
+  };
+  let utc = wall - offsetAt(wall);
+  utc = wall - offsetAt(utc);
+  return new Date(utc).toISOString();
+}
