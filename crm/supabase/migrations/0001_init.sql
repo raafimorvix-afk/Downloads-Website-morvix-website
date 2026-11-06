@@ -10,6 +10,7 @@ create table public.shifts (
   name text not null unique,                  -- 'US Night Shift', 'Australia Shift'
   timezone text not null default 'Asia/Dhaka',
   digest_hour smallint not null default 9 check (digest_hour between 0 and 23),
+  from_email text,                            -- mailbox this shift sends from (sales@ / info@)
   created_at timestamptz not null default now()
 );
 
@@ -98,10 +99,13 @@ create table public.leads (
 
   company text not null,
   contact_name text,
+  contact_designation text,
   business_type text,
   phone text,
   email text,
   street text, city text, state text, zip text, country text,
+  current_type text,                          -- InHouse / Outside
+  preferences text,
   appt_at timestamptz,                        -- exact moment of the visit
   appt_timezone text,                         -- shown in the client's local time
   frequency text,
@@ -117,6 +121,7 @@ create table public.leads (
   client_id uuid references public.clients(id),
   sent_at timestamptz,
   client_feedback text,
+  decided_at timestamptz,                     -- when it became Pass or Decline (counts toward that month)
   qa_by uuid references public.profiles(id),
   qa_at timestamptz,
 
@@ -235,14 +240,15 @@ alter table public.leads add constraint leads_payment_link_fk
   foreign key (payment_link_id) references public.payment_links(id) on delete set null;
 
 -- ---------------------------------------------------------------- agent pay: bonus and fines
--- Bonus tiers per shift: reach min_passes in a month -> earn bonus_amount (highest tier reached wins).
+-- Bonus per pass, by level. Default: passes 1-5 earn 500 BDT each, pass 6 onward earns 1000 BDT each.
+-- A pass counts toward the month the lead became Pass.
 create table public.bonus_rules (
   id uuid primary key default gen_random_uuid(),
   shift_id uuid not null references public.shifts(id),
-  min_passes int not null check (min_passes > 0),
-  bonus_amount numeric(10,2) not null,
+  from_pass int not null check (from_pass > 0),
+  amount_per_pass numeric(10,2) not null check (amount_per_pass >= 0),
   currency text not null default 'BDT',
-  unique (shift_id, min_passes)
+  unique (shift_id, from_pass)
 );
 
 -- Manual bonus or fine entries made by management, with a reason the agent can read.
@@ -303,6 +309,11 @@ create trigger clients_touch before update on public.clients for each row execut
 -- rebook: once a new date is typed, go back to Sent to Client (same as the sheet)
 create or replace function public.lead_rebook() returns trigger language plpgsql as $$
 begin
+  if new.status in ('Pass','Decline') and new.status is distinct from old.status then
+    new.decided_at := now();
+  elsif new.status not in ('Pass','Decline') then
+    new.decided_at := null;
+  end if;
   if new.status = 'Rebook – Needs New Date' and old.status = 'Rebook – Needs New Date'
      and new.appt_at is distinct from old.appt_at and new.appt_at is not null and new.client_id is not null then
     new.status := 'Sent to Client';
@@ -334,15 +345,16 @@ begin
   if my_role() is null then raise exception 'Not signed in'; end if;
   if v_shift is null then raise exception 'Choose a shift'; end if;
   if coalesce(trim(p->>'company'),'') = '' then raise exception 'Company is required'; end if;
-  insert into leads (shift_id, campaign_id, agent_id, company, contact_name, business_type, phone, email,
-                     street, city, state, zip, country, appt_at, appt_timezone, frequency, facility_size,
-                     current_provider, agent_notes, extra, source)
+  insert into leads (shift_id, campaign_id, agent_id, company, contact_name, contact_designation, business_type,
+                     phone, email, street, city, state, zip, country, appt_at, appt_timezone, frequency,
+                     facility_size, current_type, preferences, current_provider, agent_notes, extra, source)
   values (v_shift,
-          (select id from campaigns where id = (p->>'campaign_id')::uuid and shift_id = v_shift),
-          auth.uid(), p->>'company', p->>'contact_name', p->>'business_type', p->>'phone', p->>'email',
-          p->>'street', p->>'city', p->>'state', p->>'zip', p->>'country',
-          nullif(p->>'appt_at','')::timestamptz, p->>'appt_timezone', p->>'frequency', p->>'facility_size',
-          p->>'current_provider', p->>'agent_notes', coalesce(p->'extra','{}'::jsonb), 'CRM form')
+          (select id from campaigns where id = nullif(p->>'campaign_id','')::uuid and shift_id = v_shift),
+          auth.uid(), p->>'company', p->>'contact_name', p->>'contact_designation', p->>'business_type',
+          p->>'phone', p->>'email', p->>'street', p->>'city', p->>'state', p->>'zip', p->>'country',
+          nullif(p->>'appt_at','')::timestamptz, p->>'appt_timezone', p->>'frequency',
+          p->>'facility_size', p->>'current_type', p->>'preferences', p->>'current_provider', p->>'agent_notes',
+          coalesce(p->'extra','{}'::jsonb), 'CRM form')
   returning code into v_code;
   return v_code;
 end $$;
@@ -367,14 +379,19 @@ language sql stable security definer set search_path = public as $$
   a as (select * from profiles where id = p_agent),
   ok as (select (p_agent = auth.uid()) or can_manage((select shift_id from a)) as allowed),
   counts as (
-    select count(*)::int as leads,
-           count(*) filter (where status = 'Pass')::int as passes,
-           count(*) filter (where status = 'Decline')::int as declines
-    from leads, m where agent_id = p_agent
-      and submitted_at >= m.start and submitted_at < m.start + interval '1 month'),
+    select
+      (select count(*) from leads, m where agent_id = p_agent
+         and submitted_at >= m.start and submitted_at < m.start + interval '1 month')::int as leads,
+      (select count(*) from leads, m where agent_id = p_agent and status = 'Pass'
+         and decided_at >= m.start and decided_at < m.start + interval '1 month')::int as passes,
+      (select count(*) from leads, m where agent_id = p_agent and status = 'Decline'
+         and decided_at >= m.start and decided_at < m.start + interval '1 month')::int as declines),
+  -- pass number n earns the rate of the highest level whose from_pass <= n
   rule as (
-    select coalesce(max(bonus_amount), 0) as amt from bonus_rules, counts, a
-    where bonus_rules.shift_id = a.shift_id and min_passes <= counts.passes),
+    select coalesce(sum((select r.amount_per_pass from bonus_rules r, a
+                          where r.shift_id = a.shift_id and r.from_pass <= n
+                          order by r.from_pass desc limit 1)), 0) as amt
+    from counts, generate_series(1, counts.passes) n),
   adj as (
     select coalesce(sum(amount) filter (where kind='bonus'),0) as bonus,
            coalesce(sum(amount) filter (where kind='fine'),0) as fine
@@ -485,4 +502,38 @@ revoke execute on function public.agent_month(uuid, date) from public, anon;
 grant execute on function public.submit_lead(jsonb), public.my_leads(), public.agent_month(uuid, date) to authenticated;
 
 -- ---------------------------------------------------------------- starting data
-insert into public.shifts (name, timezone) values ('US Night Shift', 'Asia/Dhaka'), ('Australia Shift', 'Asia/Dhaka');
+insert into public.shifts (name, timezone, from_email) values
+  ('US Night Shift', 'Asia/Dhaka', 'sales@wearemorvix.com'),
+  ('Australia Shift', 'Asia/Dhaka', 'info@wearemorvix.com');
+
+insert into public.bonus_rules (shift_id, from_pass, amount_per_pass)
+  select id, x.from_pass, x.amt from public.shifts, (values (1, 500), (6, 1000)) as x(from_pass, amt);
+
+-- Default lead email (same wording the team sends today). {{placeholders}} are filled from the lead and client.
+insert into public.email_templates (shift_id, name, subject, body, is_default) values (null, 'Lead to client', 'New Appointment: {{company}} - {{appt_date_short}}',
+'Hello {{client_first_name}},
+
+Here is the appointment information. Please find the lead details below.
+
+Company Name: {{company}}
+Industry Type: {{business_type}}
+Address: {{address}}
+
+PoC Name: {{contact_name}}
+PoC Designation: {{contact_designation}}
+Phone Number: {{phone}}
+E-mail: {{email}}
+
+Current Type: {{current_type}}
+Frequency: {{frequency}}
+Preferences: {{preferences}}
+Facility Size: {{facility_size}}
+Appointment Date: {{appt_date_long}}
+
+Note: {{agent_notes}}
+
+Please review the information above. Let me know if you have any questions.
+
+Thank you,
+{{sender_name}}
+Morvix LLC', true);

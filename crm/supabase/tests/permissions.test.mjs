@@ -17,7 +17,7 @@ alter default privileges in schema public grant all on tables to authenticated;
 alter default privileges in schema public grant all on sequences to authenticated;
 grant all on storage.objects to authenticated;
 `);
-await db.exec(fs.readFileSync(process.argv[2], 'utf8'));
+for (const f of fs.readdirSync(new URL("../migrations/", import.meta.url)).sort()) await db.exec(fs.readFileSync(new URL("../migrations/" + f, import.meta.url), "utf8"));
 await db.exec(`grant all on all tables in schema public to authenticated; grant all on all sequences in schema public to authenticated; grant execute on all functions in schema auth to authenticated;`);
 
 const ids = { owner: '00000000-0000-0000-0000-000000000001', night: '00000000-0000-0000-0000-000000000002',
@@ -43,9 +43,12 @@ await as('owner', async () => {
 });
 
 // agent submits
-const code = await as('agent', async () => (await q(`select submit_lead($1::jsonb) as c`, [JSON.stringify({ company: 'Anytime Fitness', phone: '+1 614', appt_at: '2026-11-10T15:00:00Z', appt_timezone: 'America/New_York' })])).rows[0].c);
+const code = await as('agent', async () => (await q(`select submit_lead($1::jsonb)->>'code' as c`, [JSON.stringify({ company: 'Anytime Fitness', phone: '+1 614', appt_local: '2026-11-10T10:00', appt_timezone: 'America/New_York' })])).rows[0].c);
+const apptUtc = (await q(`select appt_at at time zone 'UTC' as t from leads where code='LD-0001'`)).rows[0].t;
+ok(new Date(apptUtc).getUTCHours() === 15, 'appointment 10:00 New York stored as 15:00 UTC');
 ok(code === 'LD-0001', 'agent can submit a lead -> ' + code);
-await as('agent2', async () => q(`select submit_lead($1::jsonb)`, [JSON.stringify({ company: 'Aussie Office' })]));
+await as('agent2', async () => q(`select submit_lead($1::jsonb)`, [JSON.stringify({ company: 'Aussie Office', phone: '+61 2' })]));
+ok(!!(await as('agent', () => tryq(`select submit_lead($1::jsonb)`, [JSON.stringify({ company: 'No phone' })]))).error, 'lead without phone is rejected');
 
 ok((await as('agent', () => q(`select * from leads`))).rows.length === 0, 'agent cannot read leads table directly');
 ok((await as('agent', () => q(`select * from clients`))).rows.length === 0, 'agent cannot read clients');
@@ -87,7 +90,6 @@ ok(agentView === 'Pass', 'agent sees the Pass result');
 
 // bonus + fines
 await as('night', async () => {
-  await q(`insert into bonus_rules (shift_id, min_passes, bonus_amount) values ($1,1,500),($1,10,2000)`, [N]);
   await q(`insert into agent_adjustments (agent_id, shift_id, month, kind, amount, reason) values ($1,$2,date_trunc('month',now())::date,'fine',200,'Late')`, [ids.agent, N]);
 });
 const m = (await as('agent', () => q(`select * from agent_month($1, current_date)`, [ids.agent]))).rows[0];
@@ -104,6 +106,21 @@ const up2 = await as('agent2', () => tryq(`insert into storage.objects (bucket_i
 ok(!!up2.error, 'other agent cannot upload to that lead');
 ok((await as('day', () => q(`select * from storage.objects`))).rows.length === 0, 'day manager cannot see night recordings');
 ok((await as('night', () => q(`select * from storage.objects`))).rows.length === 1, 'night manager can see night recordings');
+
+// bonus levels: 7 passes = 5 x 500 + 2 x 1000 = 4500
+await as('night', async () => {
+  for (let i = 0; i < 6; i++) {
+    const c = (await q(`insert into leads (shift_id, agent_id, company) values ($1,$2,'Extra ${'$'}{i}') returning id`, [N, ids.agent])).rows[0].id;
+    await q(`update leads set status='Pass' where id=$1`, [c]);
+  }
+});
+const m7 = (await as('agent', () => q(`select * from agent_month($1, current_date)`, [ids.agent]))).rows[0];
+ok(Number(m7.passes) === 7 && Number(m7.auto_bonus) === 4500, `7 passes -> bonus ${m7.auto_bonus} (expect 4500)`);
+const lastMonth = (await as('agent', () => q(`select * from agent_month($1, (current_date - interval '1 month')::date)`, [ids.agent]))).rows[0];
+ok(Number(lastMonth.passes) === 0, 'passes do not leak into other months');
+const tpl = (await as('night', () => q(`select count(*)::int c from email_templates`))).rows[0].c;
+ok(tpl === 1, 'managers can read the shared lead email template');
+ok((await as('agent', () => q(`select * from email_templates`))).rows.length === 0, 'agents cannot read email templates');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
