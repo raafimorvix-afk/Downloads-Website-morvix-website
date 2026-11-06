@@ -58,3 +58,11 @@ export function lastMonths(n = 12) {
 
 export const money = (n: number | string | null | undefined) =>
   "$" + Number(n ?? 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+// task groups shown on the dashboard and the Tasks page (urgent first)
+export const TASK_GROUPS = [
+  { key: "urgent", title: "Urgent", tone: "border-red-500", keys: ["Feedback OVERDUE", "Chase payment"] },
+  { key: "clients", title: "Talk to clients", tone: "border-amber-500", keys: ["Get visit feedback", "Confirm visit with client", "Get new date from client"] },
+  { key: "process", title: "Process leads", tone: "border-brand-500", keys: ["QA this lead", "Send to client", "Pick the client", "Add appointment date"] },
+  { key: "money", title: "Money", tone: "border-emerald-500", keys: ["Invoice client"] },
+] as const;

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getShifts, shiftFilter } from "@/lib/shifts";
-import { ACTIONS, money } from "@/lib/leads";
+import { ACTIONS, TASK_GROUPS, money } from "@/lib/leads";
 import { formatAppt } from "@/lib/format";
 import { BarList, ResultSplit, TrendChart } from "@/components/charts";
 import { SERIES, STATUS } from "@/lib/palette";
@@ -25,13 +25,7 @@ type Stats = {
 };
 type ActionRow = { id: string; code: string; company: string; appt_at: string | null; appt_timezone: string | null; next_action: string };
 
-// card look per action group: urgent first
-const GROUPS = [
-  { title: "Urgent", tone: "border-red-500", keys: ["Feedback OVERDUE", "Chase payment"] },
-  { title: "Talk to clients", tone: "border-amber-500", keys: ["Get visit feedback", "Confirm visit with client", "Get new date from client"] },
-  { title: "Process leads", tone: "border-brand-500", keys: ["QA this lead", "Send to client", "Pick the client", "Add appointment date"] },
-  { title: "Money", tone: "border-emerald-500", keys: ["Invoice client"] },
-];
+const GROUPS = TASK_GROUPS;
 
 export default async function Dashboard({ searchParams }: PageProps<"/dashboard">) {
   const me = await requireProfile(["owner", "manager"]);
@@ -148,11 +142,11 @@ export default async function Dashboard({ searchParams }: PageProps<"/dashboard"
       <section aria-labelledby="todo">
         <div className="mb-3 flex items-end justify-between">
           <h2 id="todo" className="text-lg font-semibold">Today&apos;s work</h2>
-          <span className="text-sm text-slate-500">{actions.length} open tasks</span>
+          <Link href={`/tasks${shiftQ ? "?" + shiftQ.slice(1) : ""}`} className="text-sm text-brand-700 hover:underline">Open the Tasks page ({actions.length}) →</Link>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {GROUPS.map((g) => {
-            const keys = g.keys.filter((k) => byAction.get(k)?.length);
+            const keys = (g.keys as readonly string[]).filter((k) => byAction.get(k)?.length);
             const n = g.keys.reduce((a, k) => a + (byAction.get(k)?.length ?? 0), 0);
             return (
               <div key={g.title} className={`card min-w-0 border-t-4 ${g.tone} p-4`}>

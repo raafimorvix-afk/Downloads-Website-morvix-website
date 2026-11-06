@@ -12,6 +12,7 @@ export function navFor(me: Profile): NavItem[] {
   ];
   return [
     { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
+    { href: "/tasks", label: "Tasks", icon: "tasks" },
     { href: "/leads", label: "Leads", icon: "leads" },
     { href: "/calendar", label: "Calendar", icon: "calendar" },
     { href: "/clients", label: "Clients", icon: "clients" },

@@ -5,8 +5,11 @@ import { requireProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { stripe } from "@/lib/stripe";
 import { sendMail } from "@/lib/email";
+import { paymentEmailHtml } from "@/lib/email-html";
+import { buildInvoice } from "@/lib/invoice";
 
 const back = (m: Record<string, string>) => redirect(`/billing?${new URLSearchParams(m)}`);
+const invoiceNo = (n: number) => `MVX-INV-${String(n).padStart(4, "0")}`;
 const fmt = (n: number, cur: string) => new Intl.NumberFormat("en-US", { style: "currency", currency: cur.toUpperCase() }).format(n);
 
 /**
@@ -39,9 +42,10 @@ export async function createPaymentLink(form: FormData) {
   const currency = client!.currency || "usd";
   const description = note || (leads.length ? `${leads.length} appointment${leads.length > 1 ? "s" : ""}: ${leads.map((l) => l.code).join(", ")}` : "Appointment setting services");
 
+  const due = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
   const { data: row, error } = await supabase.from("payment_links").insert({
-    shift_id: client!.shift_id, client_id: clientId, amount, currency, description, lead_ids: leads.map((l) => l.id), created_by: me.id,
-  }).select("id").single();
+    shift_id: client!.shift_id, client_id: clientId, amount, currency, description, lead_ids: leads.map((l) => l.id), created_by: me.id, due_date: due,
+  }).select("id, invoice_no").single();
   if (error || !row) back({ err: "Could not save the payment link." });
 
   let url = "";
@@ -63,7 +67,7 @@ export async function createPaymentLink(form: FormData) {
     back({ err: `Stripe refused: ${e instanceof Error ? e.message : "unknown error"}` });
   }
   if (leads.length) {
-    await supabase.from("leads").update({ payment_link_id: row!.id, invoice_status: "Invoiced", invoiced_at: new Date().toISOString().slice(0, 10), invoice_number: `PL-${row!.id.slice(0, 8).toUpperCase()}` })
+    await supabase.from("leads").update({ payment_link_id: row!.id, invoice_status: "Invoiced", invoiced_at: new Date().toISOString().slice(0, 10), invoice_number: invoiceNo(row!.invoice_no) })
       .in("id", leads.map((l) => l.id));
   }
 
@@ -73,14 +77,15 @@ export async function createPaymentLink(form: FormData) {
     if (!client!.email || !from) mailNote = " Not emailed: the client has no email address.";
     else {
       try {
+        const inv = await buildInvoice(row!.id);
         await sendMail({
-          from, to: [client!.email], cc: client!.cc_emails ?? [], subject: `Payment request from Morvix LLC – ${fmt(amount, currency)}`,
+          from, to: [client!.email], cc: client!.cc_emails ?? [],
+          subject: `Invoice ${invoiceNo(row!.invoice_no)} from Morvix LLC – ${fmt(amount, currency)}`,
           text: `Hello ${(client!.contact_name ?? "").split(" ")[0] || "there"},
 
-Please find the payment link for ${description}.
+Please find attached invoice ${invoiceNo(row!.invoice_no)} for ${description}.
 
 Amount: ${fmt(amount, currency)}
-${leads.length ? leads.map((l) => `  • ${l.code} ${l.company} – ${fmt(Number(l.price), currency)}`).join("\n") + "\n" : ""}
 Pay securely by card here:
 ${url}
 
@@ -88,6 +93,14 @@ Thank you for working with us.
 
 ${me.full_name}
 Morvix LLC`,
+          html: paymentEmailHtml({
+            greeting: `Hello ${(client!.contact_name ?? "").split(" ")[0] || "there"},`,
+            intro: `Please find attached invoice ${invoiceNo(row!.invoice_no)} for ${description}. You can pay securely by card with the button below.`,
+            amount: fmt(amount, currency), invoiceNo: invoiceNo(row!.invoice_no),
+            lines: leads.map((l) => `${l.code} · ${l.company} – ${fmt(Number(l.price), currency)}`),
+            payUrl: url, sender: me.full_name,
+          }),
+          attachments: inv ? [{ filename: `${invoiceNo(row!.invoice_no)}.pdf`, content: Buffer.from(inv.pdf), contentType: "application/pdf" }] : [],
         });
         await supabase.from("payment_links").update({ emailed_at: new Date().toISOString() }).eq("id", row!.id);
         mailNote = ` Emailed to ${client!.email}.`;

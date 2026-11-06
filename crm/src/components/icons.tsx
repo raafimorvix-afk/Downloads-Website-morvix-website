@@ -10,6 +10,8 @@ const paths: Record<string, string> = {
   team: "M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z",
   plus: "M12 5v14M5 12h14",
   results: "M5 12l4 4L19 6",
+  tasks: "M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2",
+  map: "M9 4 3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14",
   logout: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10",
 };
 export function Icon({ name, className = "h-5 w-5" }: { name: keyof typeof paths | string; className?: string }) {

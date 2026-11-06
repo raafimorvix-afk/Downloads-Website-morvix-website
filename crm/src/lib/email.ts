@@ -14,7 +14,7 @@ export function smtpPasswordFor(fromEmail: string) {
 export type MailAttachment = { filename: string; content: Buffer; contentType?: string };
 
 export async function sendMail(opts: {
-  from: string; fromName?: string; to: string[]; cc?: string[]; subject: string; text: string; attachments?: MailAttachment[];
+  from: string; fromName?: string; to: string[]; cc?: string[]; subject: string; text: string; html?: string; attachments?: MailAttachment[];
 }) {
   const { key, value: pass } = smtpPasswordFor(opts.from);
   if (!pass) throw new Error(`Email is not set up yet for ${opts.from} (missing ${key}).`);
@@ -27,7 +27,7 @@ export async function sendMail(opts: {
   await transport.sendMail({
     from: { name: opts.fromName || process.env.MAIL_FROM_NAME || "Morvix LLC", address: opts.from },
     to: opts.to, cc: opts.cc?.length ? opts.cc : undefined,
-    subject: opts.subject, text: opts.text, attachments: opts.attachments,
+    subject: opts.subject, text: opts.text, html: opts.html, attachments: opts.attachments,
   });
 }
 
