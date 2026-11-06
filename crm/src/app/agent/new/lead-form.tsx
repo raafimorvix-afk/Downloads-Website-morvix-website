@@ -9,7 +9,7 @@ import { recordUpload, submitLead } from "./actions";
 const MAX_MB = 50;
 
 type Props = { campaigns: { id: string; name: string }[]; defaultTimezone: string; defaultCountry: string };
-type Done = { code: string; uploadErrors: string[] };
+type Done = { code: string; uploadErrors: string[]; seenBefore: number };
 
 export function LeadForm({ campaigns, defaultTimezone, defaultCountry }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
@@ -48,7 +48,7 @@ export function LeadForm({ campaigns, defaultTimezone, defaultCountry }: Props) 
       if (linkErr) uploadErrors.push(`${f.name}: ${linkErr}`);
     }
     setBusy(null);
-    setDone({ code: res.code, uploadErrors });
+    setDone({ code: res.code, uploadErrors, seenBefore: res.seenBefore });
     formRef.current?.reset();
     setFiles([]);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -59,6 +59,11 @@ export function LeadForm({ campaigns, defaultTimezone, defaultCountry }: Props) 
       <div className="card p-6">
         <h2 className="text-lg font-semibold text-emerald-700">Lead {done.code} submitted</h2>
         <p className="mt-1 text-sm text-slate-600">QA will review it. You&apos;ll see the result on your results page.</p>
+        {done.seenBefore > 0 && (
+          <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+            Heads up: this phone number was already submitted {done.seenBefore} time{done.seenBefore > 1 ? "s" : ""} in the last 6 months. QA will check it.
+          </p>
+        )}
         {done.uploadErrors.length > 0 && (
           <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
             <p className="font-medium">Some recordings did not upload. Tell your manager the lead number ({done.code}):</p>

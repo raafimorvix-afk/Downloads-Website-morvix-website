@@ -20,11 +20,15 @@ create table storage.objects (id uuid primary key default gen_random_uuid(), buc
 alter table storage.objects enable row level security;
 create function storage.foldername(name text) returns text[] language sql as $$ select (string_to_array(name,'/'))[1:array_length(string_to_array(name,'/'),1)-1] $$;
 grant usage on schema public, auth, storage to authenticated, anon;
+grant execute on all functions in schema public to anon;
 alter default privileges in schema public grant all on tables to authenticated;
 alter default privileges in schema public grant all on sequences to authenticated;
 grant all on storage.objects to authenticated;
 `);
-for (const f of fs.readdirSync(new URL("../migrations/", import.meta.url)).sort()) await db.exec(fs.readFileSync(new URL("../migrations/" + f, import.meta.url), "utf8"));
+for (const f of fs.readdirSync(new URL("../migrations/", import.meta.url)).sort()) {
+  const sql = fs.readFileSync(new URL("../migrations/" + f, import.meta.url), "utf8");
+  try { await db.exec(sql); } catch (e) { console.error(`MIGRATION ${f} FAILED: ${e.message} at char ${e.position} -> ${sql.slice(Math.max(0, e.position - 80), Number(e.position) + 40).replace(/\n/g, " ")}`); process.exit(1); }
+}
 await db.exec(`grant all on all tables in schema public to authenticated; grant all on all sequences in schema public to authenticated; grant execute on all functions in schema auth to authenticated;`);
 
 const ids = { owner: '00000000-0000-0000-0000-000000000001', night: '00000000-0000-0000-0000-000000000002',
@@ -169,6 +173,40 @@ await as('owner', () => q(`update profiles set aliases = '{Luis}' where id = $1`
 const linked = (await as('owner', () => q(`select link_agent_history($1) as n`, [luis]))).rows[0].n;
 ok(linked === 2, `linked ${linked} imported leads by name and alias, same shift only (expect 2)`);
 ok(!!(await as('night', () => tryq(`select link_agent_history($1)`, [luis]))).error, 'managers cannot run history linking');
+
+// ---- invites: owner makes a one-time link; the person sets their own password
+const anon = async (fn) => { await db.exec(`set role anon; select set_config('request.jwt.sub','',false);`); try { return await fn(); } finally { await db.exec('reset role'); } };
+const token = (await as('owner', () => q(`select create_invite($1) as t`, [ids.agent]))).rows[0].t;
+ok(token.length >= 60, 'owner creates an invite token');
+ok(!!(await as('night', () => tryq(`select create_invite($1)`, [ids.agent]))).error, 'managers cannot create invites');
+ok((await anon(() => q(`select * from invite_info($1)`, [token]))).rows[0]?.full_name === 'Agent Night', 'invite link shows who it is for (no login needed)');
+ok(!!(await anon(() => tryq(`select accept_invite($1,'short')`, [token]))).error, 'invite rejects short password');
+ok((await anon(() => q(`select accept_invite($1,'a-good-password') as e`, [token]))).rows[0].e === 'a@x', 'invite sets password');
+ok(!!(await anon(() => tryq(`select accept_invite($1,'another-password')`, [token]))).error, 'invite link works only once');
+ok(!!(await anon(() => tryq(`select accept_invite('guess','a-good-password')`))).error, 'random token rejected');
+ok((await q(`select count(*)::int c from staff_invites where token_hash = $1`, [token])).rows[0].c === 0, 'raw token is never stored');
+
+// ---- client feedback link
+const fb = (await as('owner', async () => {
+  const c = (await q(`select id from clients where company='Finishing Touch'`)).rows[0].id;
+  const l = (await q(`insert into leads (shift_id, company, client_id, status) values ($1,'Feedback Co',$2,'Sent to Client') returning feedback_token`, [N, c])).rows[0];
+  return l.feedback_token;
+}));
+ok((await anon(() => q(`select * from feedback_info($1)`, [fb]))).rows[0]?.can_respond === true, 'client opens feedback link without login');
+ok((await anon(() => q(`select feedback_submit($1,'pass','Great lead') as s`, [fb]))).rows[0].s === 'Pass', 'client marks Pass from email');
+ok((await q(`select decided_at is not null as d, client_feedback f from leads where feedback_token=$1`, [fb])).rows[0].f === 'Great lead', 'feedback saved with note and decision date');
+ok(!!(await anon(() => tryq(`select feedback_submit($1,'decline','')`, [fb]))).error, 'client cannot change the answer afterwards');
+ok(!!(await anon(() => tryq(`select * from leads`))).error || (await anon(() => q(`select * from leads`))).rows.length === 0, 'anonymous visitors still cannot read leads');
+
+// ---- unlinked names, stats, server functions
+ok((await as('owner', () => q(`select * from unlinked_agent_names()`))).rows.length >= 1, 'owner sees unlinked old agent names');
+ok((await as('night', () => q(`select * from unlinked_agent_names()`))).rows.length === 0, 'managers do not see the unlinked list');
+const st = (await as('day', () => q(`select dashboard_stats(null, (current_date - 30), (current_date + 1)) as s`))).rows[0].s;
+ok(st.daily.length === 31 && st.clients.every(c => c.name !== 'Finishing Touch'), 'dashboard stats: 31 days, day manager sees no night clients');
+await q(`insert into private.settings values ('server_secret', $1)`, ['x'.repeat(40)]);
+ok(!!(await anon(() => tryq(`select server_digest('wrong-secret-wrong-secret-wrong-secret!')`))).error, 'digest refuses a wrong secret');
+const dg = (await anon(() => q(`select server_digest($1) as d`, ['x'.repeat(40)]))).rows[0].d;
+ok(dg.length === 2 && dg[0].to.length >= 1, 'digest returns both shifts with recipients');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

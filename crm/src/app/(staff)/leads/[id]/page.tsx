@@ -30,6 +30,7 @@ export default async function LeadPage({ params, searchParams }: PageProps<"/lea
     supabase.from("email_log").select("id, to_emails, subject, status, error, with_recording, created_at").eq("lead_id", id).order("created_at", { ascending: false }),
     supabase.from("lead_actions").select("next_action").eq("id", id).maybeSingle(),
   ]);
+  const { data: dups } = await supabase.rpc("lead_duplicates", { p_lead: id });
   const signed = recs?.length
     ? (await supabase.storage.from("recordings").createSignedUrls(recs.map((r) => r.storage_path), 3600)).data ?? []
     : [];
@@ -49,6 +50,14 @@ export default async function LeadPage({ params, searchParams }: PageProps<"/lea
         </p>
       </div>
       <Flash ok={sp.ok} err={sp.err} />
+      {dups && dups.length > 0 && (
+        <div role="status" className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">
+          <b>Possible duplicate:</b> the same phone number is on{" "}
+          {(dups as { id: string; code: string; company: string; status: string }[]).map((d, i) => (
+            <span key={d.id}>{i > 0 && ", "}<Link href={`/leads/${d.id}`} className="underline">{d.code} {d.company}</Link> ({d.status})</span>
+          ))}. Check before sending it to a client.
+        </div>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-3">
         {/* -------- left: workflow -------- */}

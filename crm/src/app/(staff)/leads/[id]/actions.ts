@@ -5,7 +5,7 @@ import { requireProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { STATUSES, INVOICE_STATUSES } from "@/lib/leads";
 import { zonedToUtc } from "@/lib/format";
-import { fillTemplate, longAppt, sendMail, shortAppt, type MailAttachment } from "@/lib/email";
+import { fillTemplate, longAppt, sendMail, shortAppt, siteUrl, type MailAttachment } from "@/lib/email";
 
 const back = (id: string, msg: { ok?: string; err?: string }) =>
   redirect(`/leads/${id}?${new URLSearchParams(msg as Record<string, string>)}`);
@@ -143,6 +143,12 @@ async function emailLead(leadId: string, actorId: string, senderName: string): P
     agent_notes: l.agent_notes, sender_name: senderName,
   };
   let text = fillTemplate(tpl.body, values);
+  // one-click result buttons for the client (no login needed; each link works until they answer)
+  const fb = `${siteUrl()}/f/${l.feedback_token}`;
+  text += `\n\n— After the visit, one click tells us how it went —\n` +
+    `Interested / it's a fit:  ${fb}?r=pass\n` +
+    `Not a fit:  ${fb}?r=decline\n` +
+    `Need to reschedule:  ${fb}?r=reschedule`;
   const subject = fillTemplate(tpl.subject, values);
 
   const attachments: MailAttachment[] = [];

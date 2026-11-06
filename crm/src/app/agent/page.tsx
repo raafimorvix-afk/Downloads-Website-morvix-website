@@ -65,10 +65,12 @@ export default async function AgentHome({ searchParams }: PageProps<"/agent">) {
         </div>
       </div>
 
-      <section aria-label={`Summary for ${monthLabel}`} className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <section aria-label={`Summary for ${monthLabel}`} className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <Stat label="Leads submitted" value={String(s.leads ?? 0)} />
         <Stat label="Passed" value={String(s.passes ?? 0)} tone="good" />
         <Stat label="Declined" value={String(s.declines ?? 0)} tone="bad" />
+        <Stat label="Fines" value={Number(s.fines) ? "−" + formatBDT(s.fines) : formatBDT(0)} tone={Number(s.fines) ? "bad" : undefined}
+          note={`${(adjustments ?? []).filter((a) => a.kind === "fine").length} this month`} />
         <Stat label="Bonus this month" value={formatBDT(s.total)} tone="brand"
           note={`${formatBDT(s.auto_bonus)} from passes${Number(s.manual_bonus) ? ` + ${formatBDT(s.manual_bonus)} extra` : ""}${Number(s.fines) ? ` − ${formatBDT(s.fines)} fines` : ""}`} />
       </section>
@@ -77,21 +79,26 @@ export default async function AgentHome({ searchParams }: PageProps<"/agent">) {
         Bonus rule: passes 1 to 5 earn BDT 500 each, every pass after that earns BDT 1,000.
       </p>
 
-      {adjustments && adjustments.length > 0 && (
-        <section className="card p-4">
-          <h2 className="mb-2 font-semibold">Fines and extra bonus · {monthLabel}</h2>
+      <section className="card p-4">
+        <h2 className="mb-2 font-semibold">Fines and extra bonus · {monthLabel}</h2>
+        {!adjustments?.length ? <p className="text-sm text-slate-500">No fines or extra bonus this month.</p> : (
           <ul className="divide-y divide-slate-100 text-sm">
             {adjustments.map((a, i) => (
               <li key={i} className="flex justify-between gap-4 py-2">
-                <span>{a.reason}</span>
+                <span>
+                  <span className={`mr-2 rounded-full px-2 py-0.5 text-xs ring-1 ${a.kind === "fine" ? "bg-red-50 text-red-700 ring-red-200" : "bg-emerald-50 text-emerald-700 ring-emerald-200"}`}>
+                    {a.kind === "fine" ? "Fine" : "Bonus"}
+                  </span>
+                  {a.reason} <span className="text-xs text-slate-500">· {formatDate(a.created_at)}</span>
+                </span>
                 <span className={a.kind === "fine" ? "font-medium text-red-700" : "font-medium text-emerald-700"}>
                   {a.kind === "fine" ? "−" : "+"}{formatBDT(a.amount)}
                 </span>
               </li>
             ))}
           </ul>
-        </section>
-      )}
+        )}
+      </section>
 
       <section className="card overflow-hidden">
         <h2 className="border-b border-slate-200 px-4 py-3 font-semibold">My leads ({list.length})</h2>

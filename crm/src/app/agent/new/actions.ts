@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 
-export type SubmitResult = { ok: true; id: string; code: string } | { ok: false; error: string };
+export type SubmitResult = { ok: true; id: string; code: string; seenBefore: number } | { ok: false; error: string };
 
 const FIELDS = [
   "campaign_id", "company", "business_type", "street", "city", "state", "zip", "country",
@@ -24,7 +24,8 @@ export async function submitLead(input: Record<string, string>): Promise<SubmitR
     return { ok: false, error: known ? error.message : "Could not save the lead. Please try again." };
   }
   const r = data as { id: string; code: string };
-  return { ok: true, id: r.id, code: r.code };
+  const { data: seen } = await supabase.rpc("phone_seen_count", { p_phone: payload.phone ?? "" });
+  return { ok: true, id: r.id, code: r.code, seenBefore: Math.max(0, Number(seen ?? 0) - 1) };
 }
 
 // Called after the browser uploads a recording to storage, to list it on the lead.

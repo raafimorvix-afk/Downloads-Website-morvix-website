@@ -58,3 +58,8 @@ export function fillTemplate(tpl: string, values: Record<string, string | null |
     return v && String(v).trim() ? String(v).trim() : "N/A";
   });
 }
+
+export const siteUrl = () => (process.env.NEXT_PUBLIC_SITE_URL || "https://morvix-crm.vercel.app").replace(/\/$/, "");
+
+/** Sender for invites and digests: the shift's mailbox if known, otherwise info@. */
+export const systemFrom = (shiftFrom?: string | null) => shiftFrom || process.env.SYSTEM_FROM_EMAIL || "info@wearemorvix.com";

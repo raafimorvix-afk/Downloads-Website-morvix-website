@@ -22,7 +22,9 @@ export async function proxy(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const signedIn = !!data?.claims;
   const path = request.nextUrl.pathname;
-  if (!signedIn && !path.startsWith("/login")) {
+  // public pages: login, invite link, client feedback link, server endpoints (cron, Stripe)
+  const isPublic = ["/login", "/welcome", "/f/", "/api/"].some((p) => path.startsWith(p));
+  if (!signedIn && !isPublic) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
   if (signedIn && path.startsWith("/login")) {
