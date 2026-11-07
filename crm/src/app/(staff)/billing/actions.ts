@@ -9,7 +9,6 @@ import { paymentEmailHtml } from "@/lib/email-html";
 import { buildInvoice } from "@/lib/invoice";
 
 const back = (m: Record<string, string>) => redirect(`/billing?${new URLSearchParams(m)}`);
-const invoiceNo = (n: number) => `MVX-INV-${String(n).padStart(4, "0")}`;
 const fmt = (n: number, cur: string) => new Intl.NumberFormat("en-US", { style: "currency", currency: cur.toUpperCase() }).format(n);
 
 /**
@@ -45,7 +44,7 @@ export async function createPaymentLink(form: FormData) {
   const due = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
   const { data: row, error } = await supabase.from("payment_links").insert({
     shift_id: client!.shift_id, client_id: clientId, amount, currency, description, lead_ids: leads.map((l) => l.id), created_by: me.id, due_date: due,
-  }).select("id, invoice_no").single();
+  }).select("id, invoice_no, invoice_code").single();
   if (error || !row) back({ err: "Could not save the payment link." });
 
   let url = "";
@@ -67,7 +66,7 @@ export async function createPaymentLink(form: FormData) {
     back({ err: `Stripe refused: ${e instanceof Error ? e.message : "unknown error"}` });
   }
   if (leads.length) {
-    await supabase.from("leads").update({ payment_link_id: row!.id, invoice_status: "Invoiced", invoiced_at: new Date().toISOString().slice(0, 10), invoice_number: invoiceNo(row!.invoice_no) })
+    await supabase.from("leads").update({ payment_link_id: row!.id, invoice_status: "Invoiced", invoiced_at: new Date().toISOString().slice(0, 10), invoice_number: row!.invoice_code })
       .in("id", leads.map((l) => l.id));
   }
 
@@ -80,10 +79,10 @@ export async function createPaymentLink(form: FormData) {
         const inv = await buildInvoice(row!.id);
         await sendMail({
           from, to: [client!.email], cc: client!.cc_emails ?? [],
-          subject: `Invoice ${invoiceNo(row!.invoice_no)} from Morvix LLC – ${fmt(amount, currency)}`,
+          subject: `Invoice ${row!.invoice_code} from Morvix LLC – ${fmt(amount, currency)}`,
           text: `Hello ${(client!.contact_name ?? "").split(" ")[0] || "there"},
 
-Please find attached invoice ${invoiceNo(row!.invoice_no)} for ${description}.
+Please find attached invoice ${row!.invoice_code} for ${description}.
 
 Amount: ${fmt(amount, currency)}
 Pay securely by card here:
@@ -95,12 +94,12 @@ ${me.full_name}
 Morvix LLC`,
           html: paymentEmailHtml({
             greeting: `Hello ${(client!.contact_name ?? "").split(" ")[0] || "there"},`,
-            intro: `Please find attached invoice ${invoiceNo(row!.invoice_no)} for ${description}. You can pay securely by card with the button below.`,
-            amount: fmt(amount, currency), invoiceNo: invoiceNo(row!.invoice_no),
+            intro: `Please find attached invoice ${row!.invoice_code} for ${description}. You can pay securely by card with the button below.`,
+            amount: fmt(amount, currency), invoiceNo: row!.invoice_code,
             lines: leads.map((l) => `${l.code} · ${l.company} – ${fmt(Number(l.price), currency)}`),
             payUrl: url, sender: me.full_name,
           }),
-          attachments: inv ? [{ filename: `${invoiceNo(row!.invoice_no)}.pdf`, content: Buffer.from(inv.pdf), contentType: "application/pdf" }] : [],
+          attachments: inv ? [{ filename: `${row!.invoice_code}.pdf`, content: Buffer.from(inv.pdf), contentType: "application/pdf" }] : [],
         });
         await supabase.from("payment_links").update({ emailed_at: new Date().toISOString() }).eq("id", row!.id);
         mailNote = ` Emailed to ${client!.email}.`;

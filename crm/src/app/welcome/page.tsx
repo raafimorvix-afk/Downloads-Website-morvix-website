@@ -17,7 +17,8 @@ export default async function Welcome({ searchParams }: PageProps<"/welcome">) {
     <main className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-600 text-xl font-bold text-white">M</div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-black.png" alt="Morvix" width={64} height={64} className="mx-auto mb-3 h-16 w-16" />
           <h1 className="text-2xl font-semibold">Welcome to Morvix CRM</h1>
         </div>
         {who ? (

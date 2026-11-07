@@ -35,7 +35,8 @@ export function AppShell({ me, items, children }: { me: Profile; items: NavItem[
     <div className="min-h-screen lg:flex">
       <aside className="hidden w-60 shrink-0 flex-col bg-[#0f1b33] px-3 py-5 text-white lg:flex lg:sticky lg:top-0 lg:h-screen">
         <div className="mb-6 flex items-center gap-2 px-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500 text-lg font-bold">M</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-white.png" alt="" width={36} height={36} className="h-9 w-9" />
           <span className="font-semibold">Morvix CRM</span>
         </div>
         <nav className="flex flex-1 flex-col gap-1" aria-label="Main"><NavLinks items={items} variant="side" /></nav>
@@ -50,7 +51,8 @@ export function AppShell({ me, items, children }: { me: Profile; items: NavItem[
       <header className="border-b border-slate-200 bg-white lg:hidden">
         <div className="flex items-center justify-between gap-3 px-4 py-3">
           <span className="flex items-center gap-2 font-semibold">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white">M</span>Morvix CRM
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-black.png" alt="" width={32} height={32} className="h-8 w-8" />Morvix CRM
           </span>
           <div className="flex items-center gap-3 text-slate-700">
             {who}

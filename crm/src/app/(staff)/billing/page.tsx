@@ -21,7 +21,7 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
   const supabase = await createClient();
   let qLeads = supabase.from("leads").select("id, code, company, price, decided_at, client:clients(id, company, currency, email)")
     .eq("status", "Pass").eq("invoice_status", "Not Invoiced").not("client_id", "is", null).order("decided_at", { ascending: false }).limit(1000);
-  let qLinks = supabase.from("payment_links").select("id, invoice_no, amount, currency, description, url, status, emailed_at, paid_at, created_at, client:clients(company)")
+  let qLinks = supabase.from("payment_links").select("id, invoice_no, invoice_code, amount, currency, description, url, status, emailed_at, paid_at, created_at, client:clients(company)")
     .order("created_at", { ascending: false }).limit(50);
   let qClients = supabase.from("clients").select("id, company, currency").neq("status", "Stopped").order("company");
   if (shift) { qLeads = qLeads.eq("shift_id", shift); qLinks = qLinks.eq("shift_id", shift); qClients = qClients.eq("shift_id", shift); }
@@ -118,7 +118,7 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
               <tbody className="divide-y divide-slate-100">
                 {links.map((p) => (
                   <tr key={p.id}>
-                    <td className="whitespace-nowrap px-4 py-2"><a href={`/api/invoice/${p.id}`} target="_blank" rel="noreferrer" className="font-mono text-xs text-brand-700 underline">MVX-INV-{String(p.invoice_no).padStart(4, "0")}</a></td>
+                    <td className="whitespace-nowrap px-4 py-2"><a href={`/api/invoice/${p.id}`} target="_blank" rel="noreferrer" className="font-mono text-xs text-brand-700 underline">{p.invoice_code ?? p.invoice_no}</a></td>
                     <td className="px-4 py-2 font-medium">{(p.client as unknown as { company: string } | null)?.company}</td>
                     <td className="max-w-64 truncate px-4 py-2 text-slate-600" title={p.description ?? ""}>{p.description}</td>
                     <td className="px-4 py-2 text-right">{fmt(Number(p.amount), p.currency)}</td>

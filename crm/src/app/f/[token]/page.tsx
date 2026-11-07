@@ -21,7 +21,8 @@ export default async function FeedbackPage({ params, searchParams }: PageProps<"
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-md">
         <div className="mb-5 flex items-center justify-center gap-2 font-semibold">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-white">M</span>Morvix LLC
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-black.png" alt="" width={40} height={40} className="h-10 w-10" />Morvix LLC
         </div>
         {!l ? (
           <div className="card p-6 text-center text-sm text-slate-600">This link isn&apos;t valid. Please reply to the email instead.</div>

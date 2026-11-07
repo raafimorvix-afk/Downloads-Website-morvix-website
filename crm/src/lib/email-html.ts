@@ -1,5 +1,6 @@
 // Email-safe HTML (tables + inline styles: Gmail, Outlook and phones render it the same way).
 
+const LOGO_URL = `${(process.env.NEXT_PUBLIC_SITE_URL || "https://morvix-crm.vercel.app").replace(/\/$/, "")}/logo-black.png`;
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** Turns the plain template text into paragraphs; "Label: value" lines get a bold label. */
@@ -24,7 +25,7 @@ function frame(inner: string) {
   return `<!doctype html><html><body style="margin:0;padding:0;background:#f4f6fb">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6fb;padding:24px 12px"><tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:12px;border:1px solid #e2e8f0;font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#0f172a">
-<tr><td style="padding:20px 28px;border-bottom:1px solid #eef2f7"><span style="display:inline-block;background:#1f55e0;color:#fff;font-weight:700;border-radius:8px;padding:6px 10px">M</span>
+<tr><td style="padding:20px 28px;border-bottom:1px solid #eef2f7"><img src="${LOGO_URL}" width="36" height="36" alt="Morvix" style="vertical-align:middle;border:0">
 <span style="font-weight:700;font-size:16px;margin-left:8px;vertical-align:middle">Morvix LLC</span></td></tr>
 ${inner}
 </table>
@@ -59,7 +60,7 @@ export function paymentEmailHtml(opts: { greeting: string; intro: string; amount
       <div style="font-size:28px;font-weight:700;margin-top:2px">${esc(opts.amount)}</div></td></tr>
     ${rows ? `<tr><td style="padding:0 18px 12px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows}</table></td></tr>` : ""}
   </table>
-  <p style="margin:22px 0;text-align:center"><a href="${esc(opts.payUrl)}" style="display:inline-block;background:#1f55e0;color:#fff;text-decoration:none;font-weight:700;font-size:16px;padding:14px 28px;border-radius:10px">Pay securely online</a></p>
+  <p style="margin:22px 0;text-align:center"><a href="${esc(opts.payUrl)}" style="display:inline-block;background:#743089;color:#fff;text-decoration:none;font-weight:700;font-size:16px;padding:14px 28px;border-radius:10px">Pay securely online</a></p>
   <p style="margin:0 0 14px;color:#475569;font-size:13px">The invoice is attached as a PDF. Card payments are processed by Stripe.</p>
   <p style="margin:0 0 24px">Thank you,<br>${esc(opts.sender)}<br>Morvix LLC</p>
 </td></tr>`);
