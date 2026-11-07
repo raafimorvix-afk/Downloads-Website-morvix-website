@@ -53,7 +53,10 @@ export async function createPaymentLink(form: FormData) {
       currency, unit_amount: Math.round(amount * 100),
       product_data: { name: `Morvix LLC – ${client!.company}` },
     });
+    // Managed Payments (Stripe as merchant of record, for digital goods) is on by default for some accounts;
+    // Morvix bills a B2B service, so links are created as normal payments.
     const link = await s!.paymentLinks.create({
+      ...({ managed_payments: { enabled: false } } as object),
       line_items: [{ price: price.id, quantity: 1 }],
       metadata: { morvix_link_id: row!.id, client: client!.company.slice(0, 100) },
       payment_intent_data: { description: `Morvix LLC – ${description}`.slice(0, 500) },
